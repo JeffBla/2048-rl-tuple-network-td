@@ -465,8 +465,12 @@ public:
 	 */
 	virtual float estimate(const board& b) const {
 		// TODO
-		size_t index = indexof(isomorphic[0], b);
-		return operator[](index);
+		float weight_sum = 0.0f;
+		for (int i = 0; i < iso_last; ++i) {
+			size_t index = indexof(isomorphic[i], b);
+			weight_sum += operator[](index);
+		}
+		return weight_sum;
 	}
 
 	/**
@@ -474,9 +478,13 @@ public:
 	 */
 	virtual float update(const board& b, float u) {
 		// TODO
-		size_t index = indexof(isomorphic[0], b);
-		operator[](index) += u;
-		return operator[](index);
+		float old_val = estimate(b);
+		float per = u / iso_last;
+		for (int i = 0; i < iso_last; ++i) {
+			size_t index = indexof(isomorphic[i], b);
+			operator[](index) += per;
+		}
+		return old_val + u;
 	}
 
 	/**
@@ -516,9 +524,9 @@ protected:
 		// TODO
 		size_t out = 0;
 		for(auto it = patt.rbegin(); it != patt.rend(); it++){
-			out = (out+b.at(*it)) << 4;
+			out = (out << 4) | b.at(*it);
 		}
-		return out >> 4;
+		return out;
 	}
 
 	std::string nameof(const std::vector<int>& patt) const {
@@ -690,8 +698,30 @@ public:
 		for (state* move = after; move != after + 4; move++) {
 			if (move->assign(b)) {
 				// TODO
-				float val = estimate(move->after_state());
-				move->set_value(val);
+				board s_prime = move->after_state();
+				
+				std::vector<int> empty;
+				for(int i = 0; i < 16; i++){
+					if(s_prime.at(i) == 0)
+						empty.push_back(i);
+				}
+
+				float EV = 0;
+				if(empty.empty()){
+					EV = estimate(s_prime);
+				}else{
+					for(auto j : empty){
+						board next_popup2 = s_prime;
+						board next_popup4 = s_prime;
+						next_popup2.set(j, 1);
+						next_popup4.set(j, 2);
+
+						EV += (0.9f*estimate(next_popup2) + 0.1f*estimate(next_popup4));
+					}
+					EV /= empty.size();
+				}
+
+				move->set_value(move->reward() + EV);
 				if (move->value() > best->value())
 					best = move;
 			} else {
@@ -719,8 +749,12 @@ public:
 	void update_episode(std::vector<state>& path, float alpha = 0.1) const {
 		// TODO
 		for(auto rit = path.rbegin(); rit != path.rend(); rit++){
-			float reward = rit->reward() != -1 ? rit->reward() : 0;
-			float grad =  reward + estimate(rit->after_state())-estimate(rit->before_state());
+			float reward = rit->reward() != -1 ? rit->reward() : 0.0f;
+			float grad = reward - estimate(rit->before_state());
+			auto next_s = rit-1;
+			if (rit != path.rbegin()){
+				grad +=  estimate(next_s->before_state());
+			}
 			update(rit->before_state(), alpha * grad);
 		}
 	}
@@ -842,7 +876,7 @@ int main(int argc, const char* argv[]) {
 
 	// set the learning parameters
 	float alpha = 0.1;
-	size_t total = 100000;
+	size_t total = 500000;
 	unsigned seed;
 	__asm__ __volatile__ ("rdtsc" : "=a" (seed));
 	info << "alpha = " << alpha << std::endl;
